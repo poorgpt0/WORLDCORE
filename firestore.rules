@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Primitive Helpers
+    function isValidId(id) { 
+        return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { 
+        return request.auth != null && request.auth.token.email_verified == true; 
+    }
+
+    // 1. Validations 
+    function isValidUserCreate(data) {
+        return data.keys().hasAll(['uid', 'email', 'displayName', 'createdAt', 'isVerified', 'mfaEnabled', 'phoneNumber']) &&
+               data.keys().size() == 7 &&
+               data.uid == request.auth.uid &&
+               data.email is string && data.email.size() <= 256 &&
+               data.displayName is string && data.displayName.size() <= 100 &&
+               data.createdAt == request.time &&
+               data.isVerified == false &&
+               data.mfaEnabled == false &&
+               data.phoneNumber is string && data.phoneNumber.size() <= 50;
+    }
+
+    function isProfileUpdateAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL']) &&
+               incoming().displayName is string && incoming().displayName.size() <= 100 &&
+               incoming().photoURL is string && incoming().photoURL.size() <= 1000;
+    }
+    
+    function isApiKeyGenAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['apiKey']) &&
+               incoming().apiKey is string && incoming().apiKey.size() <= 100;
+    }
+
+    function isNFTMintAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['hasMintedNFT', 'isNftOwner', 'verifiedWallet', 'mintedAiImage', 'mintTxHash']) &&
+               incoming().hasMintedNFT == true &&
+               incoming().isNftOwner == true &&
+               incoming().verifiedWallet is string && incoming().verifiedWallet.size() <= 200 &&
+               incoming().mintedAiImage is string && incoming().mintedAiImage.size() <= 1000 &&
+               incoming().mintTxHash is string && incoming().mintTxHash.size() <= 200;
+    }
+
+    function isVerifyAction() {
+        return incoming().diff(existing()).affectedKeys().hasOnly(['isVerified', 'lastLogin']) &&
+               incoming().isVerified == true &&
+               incoming().lastLogin == request.time;
+    }
+
+    function isValidUserUpdate(data) {
+        return data.uid == request.auth.uid && (
+          isProfileUpdateAction() ||
+          isApiKeyGenAction() ||
+          isNFTMintAction() ||
+          isVerifyAction()
+        );
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUserCreate(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUserUpdate(incoming());
+    }
+
+    function isValidAiNftCreate(data) {
+        return data.keys().hasAll(['userId', 'creator', 'image', 'txHash', 'contractAddress', 'createdAt', 'price', 'usdPrice', 'likes']) &&
+               data.keys().size() == 9 &&
+               data.userId == request.auth.uid &&
+               data.creator is string && data.creator.size() <= 100 &&
+               data.image is string && data.image.size() <= 1000 &&
+               data.txHash is string && data.txHash.size() <= 200 &&
+               data.contractAddress is string && data.contractAddress.size() <= 200 &&
+               data.createdAt == request.time &&
+               data.price is string && data.price.size() <= 100 &&
+               data.usdPrice is string && data.usdPrice.size() <= 100 &&
+               data.likes == 0 &&
+               exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    match /ai_nfts/{nftId} {
+      allow get: if isSignedIn() && isValidId(nftId);
+      allow list: if isSignedIn() && resource.data.txHash is string;
+      allow create: if isSignedIn() && isValidId(nftId) && isValidAiNftCreate(incoming());
+    }
+  }
+}

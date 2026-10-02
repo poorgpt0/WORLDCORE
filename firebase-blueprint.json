@@ -1,0 +1,54 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and security settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "isVerified": { "type": "boolean" },
+        "mfaEnabled": { "type": "boolean" },
+        "phoneNumber": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "apiKey": { "type": "string" },
+        "hasMintedNFT": { "type": "boolean" },
+        "isNftOwner": { "type": "boolean" },
+        "verifiedWallet": { "type": "string" },
+        "mintedAiImage": { "type": "string" },
+        "mintTxHash": { "type": "string" },
+        "lastLogin": { "type": "timestamp" }
+      },
+      "required": ["uid", "email", "createdAt", "isVerified"]
+    },
+    "AiNft": {
+      "title": "AI NFT",
+      "description": "AI-generated user NFTs.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "creator": { "type": "string" },
+        "image": { "type": "string" },
+        "txHash": { "type": "string" },
+        "contractAddress": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "price": { "type": "string" },
+        "usdPrice": { "type": "string" },
+        "likes": { "type": "number" }
+      },
+      "required": ["userId", "creator", "image", "txHash", "contractAddress", "createdAt", "price", "usdPrice", "likes"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles."
+    },
+    "/ai_nfts/{nftId}": {
+      "schema": { "$ref": "#/entities/AiNft" },
+      "description": "Stores minted AI NFTs."
+    }
+  }
+}

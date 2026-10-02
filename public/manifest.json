@@ -1,0 +1,25 @@
+{
+  "short_name": "BinancePH",
+  "name": "BinancePH | Philippines' Leading Crypto Exchange",
+  "icons": [
+    {
+      "src": "https://bin.bnbstatic.com/static/images/common/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "https://bin.bnbstatic.com/static/images/common/favicon.ico",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "https://bin.bnbstatic.com/static/images/common/favicon.ico",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#F3BA2F",
+  "background_color": "#000000"
+}
