@@ -20,11 +20,12 @@ import { Earn } from './components/Earn';
 import { HelpCenter } from './components/HelpCenter';
 import { ApiDocs } from './components/ApiDocs';
 import { ContactUs } from './components/ContactUs';
+import { GeminiOracle } from './components/GeminiOracle';
 import { LegalModal, LegalPolicyType } from './components/LegalModal';
 import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
-import { LayoutDashboard, ArrowLeftRight, Wallet, History, Settings, Bell, Menu, LogOut, User as UserIcon, ShieldCheck, Maximize2, Minimize2, BadgeCheck, Image as ImageIcon, LineChart, TrendingUp, Pickaxe, Banknote, X } from 'lucide-react';
+import { LayoutDashboard, ArrowLeftRight, Wallet, History, Settings, Bell, Menu, LogOut, User as UserIcon, ShieldCheck, Maximize2, Minimize2, BadgeCheck, Image as ImageIcon, LineChart, TrendingUp, Pickaxe, Banknote, X, Bot, Sparkles } from 'lucide-react';
 import { Button, buttonVariants } from './components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from './components/ui/sheet';
 import { cn } from './lib/utils';
@@ -56,10 +57,16 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'trade' | 'nft' | 'profile' | 'markets' | 'fees' | 'security' | 'earn' | 'help' | 'api' | 'contact'>('nft');
+  const [activeTab, setActiveTab] = useState<'trade' | 'nft' | 'profile' | 'markets' | 'fees' | 'security' | 'earn' | 'help' | 'api' | 'contact' | 'ai'>('trade');
   const [isNftOwner, setIsNftOwner] = useState(false);
   const [legalPolicy, setLegalPolicy] = useState<LegalPolicyType>(null);
   const [showAssetDetails, setShowAssetDetails] = useState(false);
+  const [toastNotice, setToastNotice] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastNotice(msg);
+    setTimeout(() => setToastNotice(null), 3500);
+  };
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -104,19 +111,30 @@ export default function App() {
               if (volNum > 1e9) volumeStr = (volNum / 1e9).toFixed(2) + 'B';
               else if (volNum > 1e6) volumeStr = (volNum / 1e6).toFixed(2) + 'M';
 
-              next[index] = {
-                ...asset,
-                price: parseFloat(t.c),
-                change: parseFloat(t.P),
-                volume: volumeStr,
-              };
+              const newPrice = parseFloat(t.c);
+              const newChange = parseFloat(t.P);
+
+              if (!isNaN(newPrice) && newPrice > 0) {
+                next[index] = {
+                  ...asset,
+                  price: newPrice,
+                  change: !isNaN(newChange) ? newChange : asset.change,
+                  volume: volumeStr,
+                };
+              }
             }
           });
 
           if (updated) {
             setSelectedAsset((currSelected) => {
               const updatedSelected = next.find((a) => a.symbol === currSelected.symbol);
-              if (updatedSelected && updatedSelected.price !== currSelected.price) {
+              if (
+                updatedSelected &&
+                typeof updatedSelected.price === 'number' &&
+                !isNaN(updatedSelected.price) &&
+                updatedSelected.price > 0 &&
+                updatedSelected.price !== currSelected.price
+              ) {
                 return updatedSelected;
               }
               return currSelected;
@@ -246,8 +264,19 @@ export default function App() {
                 </button>
 
                 <button 
+                  onClick={() => setActiveTab('ai')}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm w-full text-left ${activeTab === 'ai' ? 'bg-yellow-500/10 text-yellow-500' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50'}`}
+                >
+                  <Bot className="w-5 h-5 flex-shrink-0 text-yellow-500" />
+                  <div className="flex items-center justify-between flex-1">
+                    <span>BinancePH AI</span>
+                    <span className="text-[10px] bg-yellow-500/20 text-yellow-500 font-mono px-1.5 py-0.5 rounded">Flash</span>
+                  </div>
+                </button>
+
+                <button 
                   onClick={() => {
-                     alert("Fiat Gateway Opening Soon! Redirecting to Markets for now.");
+                     showToast("Fiat Gateway Opening Soon! Redirecting to Markets for now.");
                      setActiveTab('markets');
                   }}
                   className="flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm w-full text-left text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50"
@@ -305,7 +334,8 @@ export default function App() {
                 <div className="hidden lg:flex items-center">
                    {/* Spacing for Desktop Header Left Side */}
                    <span className="text-2xl font-black text-zinc-100 tracking-tight capitalize">
-                     {activeTab === 'nft' ? 'NFT Listing Page' :
+                     {activeTab === 'ai' ? 'BinancePH AI Oracle (Gemini Flash)' :
+                      activeTab === 'nft' ? 'NFT Listing Page' :
                       activeTab === 'trade' ? 'Trading Live' :
                       activeTab === 'markets' ? 'Markets' :
                       activeTab === 'earn' ? 'Earn' :
@@ -326,7 +356,7 @@ export default function App() {
                     className="hidden sm:flex items-center gap-2 text-zinc-400 hover:text-yellow-500 hover:bg-yellow-500/10"
                     onClick={() => {
                       navigator.clipboard.writeText(window.location.href);
-                      alert('Portal link copied to clipboard!');
+                      showToast('Portal link copied to clipboard!');
                     }}
                   >
                     <ArrowLeftRight className="h-4 w-4" />
@@ -440,8 +470,19 @@ export default function App() {
                         </button>
 
                         <button 
+                          onClick={() => setActiveTab('ai')}
+                          className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm w-full text-left ${activeTab === 'ai' ? 'bg-yellow-500/10 text-yellow-500' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50'}`}
+                        >
+                          <Bot className="w-5 h-5 flex-shrink-0 text-yellow-500" />
+                          <div className="flex items-center justify-between flex-1">
+                            <span>BinancePH AI</span>
+                            <span className="text-[10px] bg-yellow-500/20 text-yellow-500 font-mono px-1.5 py-0.5 rounded">Flash</span>
+                          </div>
+                        </button>
+
+                        <button 
                           onClick={() => {
-                             alert("Fiat Gateway Opening Soon! Redirecting to Markets for now.");
+                             showToast("Fiat Gateway Opening Soon! Redirecting to Markets for now.");
                              setActiveTab('markets');
                           }}
                           className="flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all text-sm w-full text-left text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900/50"
@@ -573,6 +614,16 @@ export default function App() {
                 >
                   <ContactUs />
                 </motion.div>
+              ) : activeTab === 'ai' ? (
+                <motion.div
+                  key="ai"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <GeminiOracle />
+                </motion.div>
               ) : (
                 <motion.div
                   key="trade"
@@ -657,6 +708,27 @@ export default function App() {
             isOpen={showAssetDetails} 
             onClose={() => setShowAssetDetails(false)} 
           />
+
+          {/* In-app Toast Notice */}
+          <AnimatePresence>
+            {toastNotice && (
+              <motion.div
+                initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 20, scale: 0.9 }}
+                className="fixed bottom-14 right-6 z-50 bg-zinc-900 border border-yellow-500/40 text-zinc-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 backdrop-blur-md"
+              >
+                <div className="w-2 h-2 rounded-full bg-yellow-500 animate-ping" />
+                <span className="text-xs font-bold">{toastNotice}</span>
+                <button
+                  onClick={() => setToastNotice(null)}
+                  className="text-zinc-500 hover:text-zinc-200 ml-2"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
             {/* Footer Stats Bar */}
             <footer className="fixed bottom-0 left-0 right-0 h-10 bg-zinc-950 border-t border-zinc-800 px-4 flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-500 z-50">

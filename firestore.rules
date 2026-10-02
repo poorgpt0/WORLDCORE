@@ -45,7 +45,7 @@ service cloud.firestore {
                incoming().hasMintedNFT == true &&
                incoming().isNftOwner == true &&
                incoming().verifiedWallet is string && incoming().verifiedWallet.size() <= 200 &&
-               incoming().mintedAiImage is string && incoming().mintedAiImage.size() <= 1000 &&
+               incoming().mintedAiImage is string && incoming().mintedAiImage.size() <= 600000 &&
                incoming().mintTxHash is string && incoming().mintTxHash.size() <= 200;
     }
 
@@ -76,7 +76,7 @@ service cloud.firestore {
                data.keys().size() == 9 &&
                data.userId == request.auth.uid &&
                data.creator is string && data.creator.size() <= 100 &&
-               data.image is string && data.image.size() <= 1000 &&
+               data.image is string && data.image.size() <= 600000 &&
                data.txHash is string && data.txHash.size() <= 200 &&
                data.contractAddress is string && data.contractAddress.size() <= 200 &&
                data.createdAt == request.time &&
@@ -87,8 +87,8 @@ service cloud.firestore {
     }
 
     match /ai_nfts/{nftId} {
-      allow get: if isSignedIn() && isValidId(nftId);
-      allow list: if isSignedIn() && resource.data.txHash is string;
+      allow get: if isValidId(nftId);
+      allow list: if resource.data.txHash is string;
       allow create: if isSignedIn() && isValidId(nftId) && isValidAiNftCreate(incoming());
     }
   }

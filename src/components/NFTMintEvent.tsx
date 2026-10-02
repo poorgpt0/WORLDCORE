@@ -8,9 +8,6 @@ import { doc, updateDoc, onSnapshot, collection, addDoc, serverTimestamp } from 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useSendTransaction, useAccount } from 'wagmi';
 import { stringToHex } from 'viem';
-import { GoogleGenAI } from '@google/genai';
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export function NFTMintEvent({ isVerified }: { isVerified: boolean }) {
   const [isVisible, setIsVisible] = useState(true);
@@ -25,23 +22,24 @@ export function NFTMintEvent({ isVerified }: { isVerified: boolean }) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImg, setGeneratedImg] = useState<string | null>(null);
   const [loadingPhrase, setLoadingPhrase] = useState('AI is Painting...');
+  const [nftMetadata, setNftMetadata] = useState<any>(null);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isGenerating) return;
     const phrases = [
-      'Initializing Neural Canvas...',
-      'Synthesizing Pixel Artifacts...',
-      'Applying Cyberpunk Aesthetics...',
-      'Enhancing NFT Value...',
+      'Querying Gemini Flash Engine...',
+      'Synthesizing Neural Canvas...',
+      'Generating Cyberpunk Lore...',
+      'Encoding Blockchain Attributes...',
       'Finalizing 4K Render...'
     ];
     let idx = 0;
     const interval = setInterval(() => {
       idx = (idx + 1) % phrases.length;
       setLoadingPhrase(phrases[idx]);
-    }, 2000);
+    }, 1500);
     return () => clearInterval(interval);
   }, [isGenerating]);
   const [listingPrice, setListingPrice] = useState('');
@@ -110,6 +108,113 @@ export function NFTMintEvent({ isVerified }: { isVerified: boolean }) {
     return () => unsub();
   }, [user]);
 
+  // Generate high-resolution collectible artwork canvas based on Gemini response
+  const generateCanvasImage = (title: string, rarity: string, colors: string[], promptText: string): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 600;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    const primaryColor = colors[0] || '#F3BA2F';
+    const secondaryColor = colors[2] || '#00F0FF';
+    const darkBg = '#0B0E11';
+
+    // Dark sleek background
+    const bgGrad = ctx.createLinearGradient(0, 0, 600, 600);
+    bgGrad.addColorStop(0, darkBg);
+    bgGrad.addColorStop(0.5, '#14181E');
+    bgGrad.addColorStop(1, '#050709');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, 600, 600);
+
+    // Cyberpunk grid
+    ctx.strokeStyle = 'rgba(243, 186, 47, 0.08)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < 600; x += 30) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 600);
+      ctx.stroke();
+    }
+    for (let y = 0; y < 600; y += 30) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(600, y);
+      ctx.stroke();
+    }
+
+    // Glowing central geometric circle
+    const glowGrad = ctx.createRadialGradient(300, 260, 20, 300, 260, 220);
+    glowGrad.addColorStop(0, 'rgba(243, 186, 47, 0.35)');
+    glowGrad.addColorStop(0.6, 'rgba(0, 240, 255, 0.12)');
+    glowGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(300, 260, 220, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Outer neon ring
+    ctx.strokeStyle = primaryColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(300, 260, 160, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Inner pulsing ring
+    ctx.strokeStyle = secondaryColor;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([12, 8]);
+    ctx.beginPath();
+    ctx.arc(300, 260, 140, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Central Binance Diamond Glyph
+    ctx.save();
+    ctx.translate(300, 260);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = primaryColor;
+    ctx.fillRect(-45, -45, 90, 90);
+
+    ctx.fillStyle = '#0B0E11';
+    ctx.fillRect(-22, -22, 44, 44);
+
+    ctx.fillStyle = secondaryColor;
+    ctx.fillRect(-10, -10, 20, 20);
+    ctx.restore();
+
+    // Top Header: BINANCEPH AI LABS
+    ctx.fillStyle = 'rgba(243, 186, 47, 0.9)';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚡ BINANCEPH AI GENESIS 1-OF-1', 300, 50);
+
+    // Rarity Badge
+    ctx.fillStyle = primaryColor;
+    ctx.fillRect(230, 70, 140, 26);
+    ctx.fillStyle = '#000000';
+    ctx.font = '900 12px sans-serif';
+    ctx.fillText(rarity.toUpperCase() + ' EDITION', 300, 88);
+
+    // Title at bottom
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 24px sans-serif';
+    ctx.fillText(title.length > 28 ? title.slice(0, 28) + '...' : title, 300, 480);
+
+    // Prompt subtitle
+    ctx.fillStyle = '#A1A1AA';
+    ctx.font = 'italic 13px sans-serif';
+    ctx.fillText(`"${promptText.length > 45 ? promptText.slice(0, 45) + '...' : promptText}"`, 300, 510);
+
+    // Blockchain verified footer
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.font = '10px monospace';
+    ctx.fillText(`POWERED BY GEMINI FLASH • VERIFIED ON-CHAIN • MANILA, PH`, 300, 555);
+
+    return canvas.toDataURL('image/png', 0.85);
+  };
+
   const handleGenerateAI = async () => {
     if (!prompt) return;
     setIsGenerating(true);
@@ -117,27 +222,29 @@ export function NFTMintEvent({ isVerified }: { isVerified: boolean }) {
     setErrorMsg(null);
     
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: `${prompt}, high quality, digital art, masterpiece, 1of1 NFT` }]
-        }
+      const response = await fetch('/api/gemini/generate-nft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
       });
-      
-      const parts = response.candidates?.[0]?.content?.parts || [];
-      for (const part of parts) {
-        if (part.inlineData) {
-          setGeneratedImg(`data:image/png;base64,${part.inlineData.data}`);
-          break;
-        }
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
       }
+
+      const resData = await response.json();
+      const meta = resData.metadata || {};
+      setNftMetadata(meta);
+
+      const title = meta.title || 'Cyberpunk NFT';
+      const rarity = meta.rarity || 'Legendary';
+      const colors = meta.colors || ['#F3BA2F', '#0B0E11', '#00F0FF'];
+
+      const artwork = generateCanvasImage(title, rarity, colors, prompt);
+      setGeneratedImg(artwork);
     } catch (error: any) {
       console.error('Image generation error:', error);
-      if (error?.message?.toLowerCase().includes('rate') || error?.status === 429) {
-        setErrorMsg('Rate limit exceeded. Please wait a moment and try again.');
-      } else {
-        setErrorMsg('Failed to generate image. Please try again.');
-      }
+      setErrorMsg('Failed to generate NFT with Gemini Flash. Please retry.');
     } finally {
       setIsGenerating(false);
     }

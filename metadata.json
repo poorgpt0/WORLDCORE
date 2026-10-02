@@ -1,5 +1,8 @@
 {
   "name": "Remix: BINANCEPH | www.binanceph.ai",
   "description": "The premier cryptocurrency trading platform for the Philippines. Secure, fast, and localized for the Filipino market.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
