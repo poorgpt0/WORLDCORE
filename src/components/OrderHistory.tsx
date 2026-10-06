@@ -4,6 +4,7 @@ import { History, Clock, CheckCircle2, XCircle, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { auth } from '../lib/firebase';
 import { AuthModal } from './AuthModal';
+import { formatPrice } from '@/lib/binance';
 
 interface Order {
   id: string;
@@ -18,10 +19,10 @@ interface Order {
 }
 
 const MOCK_ORDERS: Order[] = [
-  { id: '1', time: '2024-04-13 10:24:12', asset: 'BTC', type: 'Market', side: 'Buy', price: 64231.50, amount: 0.05, total: 3211.58, status: 'Filled' },
-  { id: '2', time: '2024-04-13 09:15:45', asset: 'ETH', type: 'Limit', side: 'Sell', price: 3500.00, amount: 1.2, total: 4200.00, status: 'Pending' },
-  { id: '3', time: '2024-04-12 18:30:00', asset: 'SOL', type: 'Market', side: 'Buy', price: 142.10, amount: 10, total: 1421.00, status: 'Filled' },
-  { id: '4', time: '2024-04-12 14:20:12', asset: 'BNB', type: 'Limit', side: 'Sell', price: 600.00, amount: 5, total: 3000.00, status: 'Cancelled' },
+  { id: '1', time: '2026-10-02 10:24:12', asset: 'BTC', type: 'Market', side: 'Buy', price: 86390.50, amount: 0.05, total: 4319.52, status: 'Filled' },
+  { id: '2', time: '2026-10-02 09:15:45', asset: 'ETH', type: 'Limit', side: 'Sell', price: 2750.00, amount: 1.2, total: 3300.00, status: 'Pending' },
+  { id: '3', time: '2026-10-01 18:30:00', asset: 'SOL', type: 'Market', side: 'Buy', price: 152.10, amount: 10, total: 1521.00, status: 'Filled' },
+  { id: '4', time: '2026-10-01 14:20:12', asset: 'BNB', type: 'Limit', side: 'Sell', price: 595.00, amount: 5, total: 2975.00, status: 'Cancelled' },
 ];
 
 export function OrderHistory({ isVerified }: { isVerified: boolean }) {
@@ -99,9 +100,9 @@ export function OrderHistory({ isVerified }: { isVerified: boolean }) {
                         {order.side}
                       </span>
                     </td>
-                    <td className="px-6 py-4 font-mono text-zinc-300">${order.price.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono text-zinc-300 font-bold">${formatPrice(order.price)}</td>
                     <td className="px-6 py-4 font-mono text-zinc-300">{order.amount}</td>
-                    <td className="px-6 py-4 font-mono text-zinc-300">${order.total.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono text-zinc-300">${order.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-1.5 text-yellow-500">
                         <Clock className="h-3 w-3" />
@@ -157,9 +158,9 @@ export function OrderHistory({ isVerified }: { isVerified: boolean }) {
                         {order.side}
                       </span>
                     </td>
-                    <td className="px-6 py-4 font-mono text-zinc-300">${order.price.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono text-zinc-300 font-bold">${formatPrice(order.price)}</td>
                     <td className="px-6 py-4 font-mono text-zinc-300">{order.amount}</td>
-                    <td className="px-6 py-4 font-mono text-zinc-300">${order.total.toFixed(2)}</td>
+                    <td className="px-6 py-4 font-mono text-zinc-300">${order.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="px-6 py-4">
                       <div className={cn(
                         "flex items-center gap-1.5",

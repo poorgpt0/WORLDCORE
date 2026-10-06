@@ -1,0 +1,385 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+contract WorldcoreBNBLaunch is ERC20, ERC20Burnable, Ownable, ReentrancyGuard {
+    uint256 public constant TOTAL_SUPPLY = 1_000_000_000 * 10**18;
+    uint256 public constant MAX_TAX = 25;
+
+    bool public paused;
+    bool public tradingEnabled;
+    uint256 public launchTimestamp;
+    uint256 public antiBotWindow = 1 hours;
+
+    uint256 public buyTax = 5;
+    uint256 public sellTax = 8;
+    uint256 public transferTax = 0;
+
+    uint256 public marketingTaxShare = 50;
+    uint256 public liquidityTaxShare = 30;
+    uint256 public burnTaxShare = 20;
+
+    uint256 public maxBuyAmount = 20_000_000 * 10**18;
+    uint256 public maxSellAmount = 10_000_000 * 10**18;
+    uint256 public maxWalletAmount = 50_000_000 * 10**18;
+
+    address public marketingWallet;
+    address public liquidityWallet;
+    address public pairAddress;
+    address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
+
+    struct VestingSchedule {
+        uint256 totalAmount;
+        uint256 released;
+        uint256 start;
+        uint256 cliff;
+        uint256 duration;
+        uint256 interval;
+        bool active;
+    }
+
+    struct LiquidityLock {
+        uint256 totalAmount;
+        uint256 released;
+        uint256 unlockTime;
+        bool active;
+    }
+
+    mapping(address => bool) public blacklist;
+    mapping(address => bool) public taxExempt;
+    mapping(address => bool) public limitExempt;
+    mapping(address => VestingSchedule) public vestingSchedules;
+    mapping(address => LiquidityLock) public liquidityLocks;
+
+    event TaxesUpdated(uint256 buyTax, uint256 sellTax, uint256 transferTax);
+    event TaxAllocationsUpdated(uint256 marketing, uint256 liquidity, uint256 burn);
+    event LimitsUpdated(uint256 maxBuy, uint256 maxSell, uint256 maxWallet);
+    event TradingEnabled(uint256 timestamp);
+    event MarketingWalletUpdated(address indexed wallet);
+    event LiquidityWalletUpdated(address indexed wallet);
+    event PairAddressUpdated(address indexed pair);
+    event Blacklisted(address indexed user, bool status);
+    event TeamVestingCreated(address indexed beneficiary, uint256 amount, uint256 start, uint256 cliff, uint256 duration, uint256 interval);
+    event TeamVestingReleased(address indexed beneficiary, uint256 amount);
+    event LiquidityLocked(address indexed locker, uint256 amount, uint256 unlockTime);
+    event LiquidityReleased(address indexed locker, uint256 amount);
+
+    constructor(address _marketingWallet, address _liquidityWallet)
+        ERC20("Worldcore", "WCORE")
+        Ownable(msg.sender)
+    {
+        require(_marketingWallet != address(0), "Marketing wallet cannot be zero");
+
+        marketingWallet = _marketingWallet;
+        liquidityWallet = _liquidityWallet == address(0) ? msg.sender : _liquidityWallet;
+
+        taxExempt[msg.sender] = true;
+        taxExempt[marketingWallet] = true;
+        taxExempt[liquidityWallet] = true;
+        taxExempt[address(this)] = true;
+        taxExempt[DEAD] = true;
+
+        limitExempt[msg.sender] = true;
+        limitExempt[marketingWallet] = true;
+        limitExempt[liquidityWallet] = true;
+        limitExempt[address(this)] = true;
+        limitExempt[DEAD] = true;
+
+        _mint(msg.sender, TOTAL_SUPPLY);
+    }
+
+    modifier notPaused() {
+        require(!paused, "Token paused");
+        _;
+    }
+
+    function pause() external onlyOwner {
+        paused = true;
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+    }
+
+    function enableTrading() external onlyOwner {
+        require(!tradingEnabled, "Trading already enabled");
+        tradingEnabled = true;
+        launchTimestamp = block.timestamp;
+        emit TradingEnabled(block.timestamp);
+    }
+
+    function setMarketingWallet(address _wallet) external onlyOwner {
+        require(_wallet != address(0), "Invalid wallet");
+        marketingWallet = _wallet;
+        taxExempt[_wallet] = true;
+        limitExempt[_wallet] = true;
+        emit MarketingWalletUpdated(_wallet);
+    }
+
+    function setLiquidityWallet(address _wallet) external onlyOwner {
+        require(_wallet != address(0), "Invalid wallet");
+        liquidityWallet = _wallet;
+        taxExempt[_wallet] = true;
+        limitExempt[_wallet] = true;
+        emit LiquidityWalletUpdated(_wallet);
+    }
+
+    function setPairAddress(address _pair) external onlyOwner {
+        require(_pair != address(0), "Invalid pair");
+        if (pairAddress != address(0)) {
+            limitExempt[pairAddress] = false;
+        }
+        pairAddress = _pair;
+        taxExempt[_pair] = false;
+        limitExempt[_pair] = true;
+        emit PairAddressUpdated(_pair);
+    }
+
+    function setTaxes(uint256 _buyTax, uint256 _sellTax, uint256 _transferTax) external onlyOwner {
+        require(_buyTax <= MAX_TAX && _sellTax <= MAX_TAX && _transferTax <= MAX_TAX, "Tax above max");
+        buyTax = _buyTax;
+        sellTax = _sellTax;
+        transferTax = _transferTax;
+        emit TaxesUpdated(_buyTax, _sellTax, _transferTax);
+    }
+
+    function setTaxDistribution(uint256 _marketing, uint256 _liquidity, uint256 _burn) external onlyOwner {
+        require(_marketing + _liquidity + _burn == 100, "Distribution must equal 100");
+        marketingTaxShare = _marketing;
+        liquidityTaxShare = _liquidity;
+        burnTaxShare = _burn;
+        emit TaxAllocationsUpdated(_marketing, _liquidity, _burn);
+    }
+
+    function setLimits(uint256 _maxBuy, uint256 _maxSell, uint256 _maxWallet) external onlyOwner {
+        require(_maxBuy > 0 && _maxSell > 0 && _maxWallet > 0, "Limits must be > 0");
+        maxBuyAmount = _maxBuy;
+        maxSellAmount = _maxSell;
+        maxWalletAmount = _maxWallet;
+        emit LimitsUpdated(_maxBuy, _maxSell, _maxWallet);
+    }
+
+    function setBlacklist(address user, bool status) external onlyOwner {
+        require(user != owner() && user != pairAddress && user != address(this), "Cannot blacklist protected address");
+        blacklist[user] = status;
+        emit Blacklisted(user, status);
+    }
+
+    function setTaxExempt(address user, bool status) external onlyOwner {
+        taxExempt[user] = status;
+    }
+
+    function setLimitExempt(address user, bool status) external onlyOwner {
+        limitExempt[user] = status;
+    }
+
+    function createTeamVesting(
+        address beneficiary,
+        uint256 amount,
+        uint256 start,
+        uint256 cliff,
+        uint256 duration,
+        uint256 interval
+    ) external onlyOwner {
+        require(beneficiary != address(0), "Invalid beneficiary");
+        require(amount > 0, "Amount must be > 0");
+        require(duration > 0, "Duration must be > 0");
+        require(interval > 0 && duration >= interval, "Invalid interval");
+        require(cliff <= duration, "Cliff exceeds duration");
+        require(!vestingSchedules[beneficiary].active, "Schedule exists");
+        require(balanceOf(msg.sender) >= amount, "Insufficient balance");
+
+        uint256 startTime = start == 0 ? block.timestamp : start;
+
+        vestingSchedules[beneficiary] = VestingSchedule({
+            totalAmount: amount,
+            released: 0,
+            start: startTime,
+            cliff: cliff,
+            duration: duration,
+            interval: interval,
+            active: true
+        });
+
+        _update(msg.sender, address(this), amount);
+        emit TeamVestingCreated(beneficiary, amount, startTime, cliff, duration, interval);
+    }
+
+    function releaseTeamVesting(address beneficiary) external nonReentrant {
+        require(vestingSchedules[beneficiary].active, "No vesting schedule");
+        require(!blacklist[beneficiary], "Beneficiary blacklisted");
+        VestingSchedule storage schedule = vestingSchedules[beneficiary];
+
+        uint256 vested = _vestedAmount(schedule);
+        uint256 releasable = vested - schedule.released;
+
+        require(releasable > 0, "Nothing to release");
+
+        schedule.released += releasable;
+        if (schedule.released >= schedule.totalAmount) {
+            schedule.active = false;
+        }
+
+        _update(address(this), beneficiary, releasable);
+
+        emit TeamVestingReleased(beneficiary, releasable);
+    }
+
+    function lockLiquidity(uint256 amount, uint256 unlockTime) external onlyOwner {
+        require(amount > 0, "Amount must be > 0");
+        require(unlockTime > block.timestamp, "Unlock time must be in future");
+        require(balanceOf(msg.sender) >= amount, "Not enough tokens");
+        require(!liquidityLocks[owner()].active, "Active lock already exists");
+
+        liquidityLocks[owner()] = LiquidityLock({
+            totalAmount: amount,
+            released: 0,
+            unlockTime: unlockTime,
+            active: true
+        });
+
+        _update(msg.sender, address(this), amount);
+        emit LiquidityLocked(msg.sender, amount, unlockTime);
+    }
+
+    function releaseLiquidity() external onlyOwner nonReentrant {
+        LiquidityLock storage lock = liquidityLocks[owner()];
+        require(lock.active, "No liquidity lock");
+        require(block.timestamp >= lock.unlockTime, "Lock not expired");
+
+        uint256 releasable = lock.totalAmount - lock.released;
+        require(releasable > 0, "Nothing to release");
+
+        lock.released += releasable;
+        if (lock.released >= lock.totalAmount) {
+            lock.active = false;
+        }
+
+        _update(address(this), owner(), releasable);
+
+        emit LiquidityReleased(msg.sender, releasable);
+    }
+
+    function burn(uint256 value) public override notPaused {
+        require(!blacklist[_msgSender()], "Blacklisted");
+        super.burn(value);
+    }
+
+    function burnFrom(address account, uint256 value) public override notPaused {
+        require(!blacklist[_msgSender()] && !blacklist[account], "Blacklisted");
+        super.burnFrom(account, value);
+    }
+
+    function transfer(address to, uint256 amount) public override notPaused returns (bool) {
+        _transferWithTax(_msgSender(), to, amount);
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override notPaused returns (bool) {
+        address spender = _msgSender();
+        _spendAllowance(from, spender, amount);
+        _transferWithTax(from, to, amount);
+        return true;
+    }
+
+    function _transferWithTax(address from, address to, uint256 amount) internal nonReentrant {
+        require(from != address(0), "ERC20: transfer from zero");
+        require(to != address(0), "ERC20: transfer to zero");
+        require(!blacklist[from] && !blacklist[to], "Blacklisted");
+
+        if (!tradingEnabled && !taxExempt[from] && !taxExempt[to]) {
+            revert("Trading not enabled");
+        }
+
+        uint256 taxAmount = _calculateTax(from, to, amount);
+        uint256 transferAmount = amount - taxAmount;
+
+        _enforceAntiBot(from, to, amount, transferAmount);
+
+        if (taxAmount > 0) {
+            uint256 marketingAmount = (taxAmount * marketingTaxShare) / 100;
+            uint256 liquidityAmount = (taxAmount * liquidityTaxShare) / 100;
+            uint256 burnAmount = taxAmount - marketingAmount - liquidityAmount;
+
+            if (marketingAmount > 0) {
+                _update(from, marketingWallet, marketingAmount);
+            }
+
+            if (liquidityAmount > 0) {
+                _update(from, liquidityWallet, liquidityAmount);
+            }
+
+            if (burnAmount > 0) {
+                _update(from, DEAD, burnAmount);
+            }
+        }
+
+        _update(from, to, transferAmount);
+    }
+
+    function _calculateTax(address from, address to, uint256 amount) internal view returns (uint256) {
+        if (taxExempt[from] || taxExempt[to]) {
+            return 0;
+        }
+
+        if (to == pairAddress && pairAddress != address(0)) {
+            return (amount * sellTax) / 100;
+        }
+
+        if (from == pairAddress && pairAddress != address(0)) {
+            return (amount * buyTax) / 100;
+        }
+
+        return (amount * transferTax) / 100;
+    }
+
+    function _enforceAntiBot(address from, address to, uint256 grossAmount, uint256 netAmount) internal view {
+        if (launchTimestamp == 0 || block.timestamp > launchTimestamp + antiBotWindow) {
+            return;
+        }
+
+        if (!limitExempt[to] && to != pairAddress && to != DEAD) {
+            require(balanceOf(to) + netAmount <= maxWalletAmount, "Wallet limit exceeded");
+        }
+
+        if (from == pairAddress && !limitExempt[to]) {
+            require(grossAmount <= maxBuyAmount, "Buy limit exceeded");
+        }
+
+        if (to == pairAddress && !limitExempt[from]) {
+            require(grossAmount <= maxSellAmount, "Sell limit exceeded");
+        }
+    }
+
+    function vestedAmount(address beneficiary) external view returns (uint256) {
+        VestingSchedule storage schedule = vestingSchedules[beneficiary];
+        if (!schedule.active) return schedule.released;
+        return _vestedAmount(schedule);
+    }
+
+    function _vestedAmount(VestingSchedule storage schedule) internal view returns (uint256) {
+        if (block.timestamp < schedule.start + schedule.cliff) {
+            return 0;
+        }
+
+        uint256 elapsed = block.timestamp - schedule.start;
+        uint256 totalDuration = schedule.duration;
+
+        if (elapsed >= totalDuration) {
+            return schedule.totalAmount;
+        }
+
+        uint256 effectiveElapsed = (elapsed / schedule.interval) * schedule.interval;
+        uint256 vested = (schedule.totalAmount * effectiveElapsed) / totalDuration;
+
+        if (vested > schedule.totalAmount) {
+            return schedule.totalAmount;
+        }
+
+        return vested;
+    }
+}

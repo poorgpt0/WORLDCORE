@@ -1,35 +1,67 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { X, TrendingUp, TrendingDown, Clock, Activity, BarChart3, ChevronRight } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, Clock, Activity, BarChart3, ChevronRight, Bell } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Asset } from './AssetList';
 import { Button } from './ui/button';
+import { formatPrice, fetchLiveBinanceKlines } from '@/lib/binance';
 
 interface AssetDetailsModalProps {
   asset: Asset | null;
   isOpen: boolean;
   onClose: () => void;
+  onOpenPriceAlert?: (asset: Asset) => void;
 }
 
-export function AssetDetailsModal({ asset, isOpen, onClose }: AssetDetailsModalProps) {
+export function AssetDetailsModal({ asset, isOpen, onClose, onOpenPriceAlert }: AssetDetailsModalProps) {
   const [chartData, setChartData] = useState<any[]>([]);
 
   useEffect(() => {
     if (asset && isOpen) {
-      // Generate some mock historical data for the 7d chart
-      const data = [];
-      let currentPrice = asset.price * 0.9; // Start somewhat lower or higher
-      const now = new Date();
-      for (let i = 0; i < 30; i++) {
-        data.unshift({
-          time: new Date(now.getTime() - i * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-          price: currentPrice
+      let isMounted = true;
+      // Fetch real 30-day daily klines from Binance
+      fetchLiveBinanceKlines(asset.symbol, '1d', 30)
+        .then(({ points }) => {
+          if (!isMounted) return;
+          if (points.length > 0) {
+            setChartData(points.map(p => ({
+              time: new Date((p.time as number) * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+              price: p.close
+            })));
+          } else {
+            // fallback
+            const data = [];
+            let currentPrice = asset.price * 0.95;
+            const now = new Date();
+            for (let i = 30; i >= 0; i--) {
+              data.push({
+                time: new Date(now.getTime() - i * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+                price: currentPrice
+              });
+              currentPrice = currentPrice * (1 + (Math.random() * 0.04 - 0.02));
+            }
+            setChartData(data);
+          }
+        })
+        .catch(() => {
+          if (!isMounted) return;
+          const data = [];
+          let currentPrice = asset.price * 0.95;
+          const now = new Date();
+          for (let i = 30; i >= 0; i--) {
+            data.push({
+              time: new Date(now.getTime() - i * 24 * 60 * 60 * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+              price: currentPrice
+            });
+            currentPrice = currentPrice * (1 + (Math.random() * 0.04 - 0.02));
+          }
+          setChartData(data);
         });
-        // Random walk
-        currentPrice = currentPrice * (1 + (Math.random() * 0.06 - 0.03));
-      }
-      setChartData(data);
+
+      return () => {
+        isMounted = false;
+      };
     }
   }, [asset, isOpen]);
 
@@ -91,7 +123,7 @@ export function AssetDetailsModal({ asset, isOpen, onClose }: AssetDetailsModalP
                   <p className="text-zinc-500 text-sm font-bold uppercase tracking-widest mb-1">Current Price</p>
                   <div className="flex items-end gap-3">
                     <span className="text-4xl font-mono font-bold text-zinc-100">
-                      ${asset.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${formatPrice(asset.price)}
                     </span>
                     <span className={`text-lg font-mono font-bold flex items-center mb-1 ${isPositive ? 'text-green-500' : 'text-red-500'}`}>
                       {isPositive ? <TrendingUp className="w-5 h-5 mr-1" /> : <TrendingDown className="w-5 h-5 mr-1" />}
@@ -100,6 +132,19 @@ export function AssetDetailsModal({ asset, isOpen, onClose }: AssetDetailsModalP
                   </div>
                 </div>
                 <div className="flex gap-2">
+                   {onOpenPriceAlert && (
+                     <Button
+                       variant="outline"
+                       onClick={() => {
+                         onClose();
+                         onOpenPriceAlert(asset);
+                       }}
+                       className="border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-100 font-bold px-4"
+                     >
+                       <Bell className="w-4 h-4 mr-1.5 text-yellow-500" />
+                       Set Price Alert
+                     </Button>
+                   )}
                    <Button onClick={onClose} className="bg-yellow-500 hover:bg-yellow-600 text-black font-bold px-8">
                      Trade Now <ChevronRight className="w-4 h-4 ml-1" />
                    </Button>

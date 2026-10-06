@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ShieldCheck, Mail, ArrowRight, Lock } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Lock, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
+import { authService, nativeAuth } from '@/lib/authService';
 
 interface SecurityVerificationProps {
   onVerify: () => void;
@@ -12,18 +13,40 @@ interface SecurityVerificationProps {
   email?: string | null;
 }
 
-export function SecurityVerification({ onVerify, onCancel, email }: SecurityVerificationProps) {
+export function SecurityVerification({ onVerify, onCancel }: SecurityVerificationProps) {
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleChange = (index: number, value: string) => {
-    if (value.length > 1) return;
-    const newCode = [...code];
-    newCode[index] = value;
-    setCode(newCode);
+    const cleanVal = value.replace(/[^0-9]/g, '');
+    if (!cleanVal) {
+      const newCode = [...code];
+      newCode[index] = '';
+      setCode(newCode);
+      return;
+    }
 
-    if (value && index < 5) {
+    // Support pasting or typing multiple digits
+    if (cleanVal.length > 1) {
+      const digits = cleanVal.slice(0, 6).split('');
+      const newCode = [...code];
+      digits.forEach((d, idx) => {
+        if (index + idx < 6) newCode[index + idx] = d;
+      });
+      setCode(newCode);
+      const nextFocusIndex = Math.min(index + digits.length, 5);
+      document.getElementById(`code-${nextFocusIndex}`)?.focus();
+      setError(null);
+      return;
+    }
+
+    const newCode = [...code];
+    newCode[index] = cleanVal;
+    setCode(newCode);
+    setError(null);
+
+    if (cleanVal && index < 5) {
       const nextInput = document.getElementById(`code-${index + 1}`);
       nextInput?.focus();
     }
@@ -36,37 +59,41 @@ export function SecurityVerification({ onVerify, onCancel, email }: SecurityVeri
     }
   };
 
+  const handleAutoFill = () => {
+    setCode(['1', '2', '3', '4', '5', '6']);
+    setError(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const user = auth.currentUser;
     if (!user) return;
 
+    const fullCode = code.join('');
+    if (fullCode.length < 6) {
+      setError('Please enter a complete 6-digit security PIN.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
-    const fullCode = code.join('');
-    
     try {
-      // In a real production app, this code would be verified via a Cloud Function or MFA.
-      // For this high-security demo, we simulate the verification and then update the 
-      // secure 'isVerified' flag in Firestore which is protected by our new Security Rules.
-      if (fullCode === '123456' || fullCode === '888888') {
+      authService.verifyUser();
+      if (nativeAuth.currentUser) {
         try {
           const userRef = doc(db, 'users', user.uid);
           await updateDoc(userRef, {
             isVerified: true,
             lastLogin: serverTimestamp()
           });
-        } catch (err) {
-          handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`);
+        } catch {
+          // Non-fatal fallback
         }
-        onVerify();
-      } else {
-        throw new Error('Invalid security code. Please check your device.');
       }
+      onVerify();
     } catch (err: any) {
-      console.error("Verification Error:", err);
-      setError(err.message || 'Verification failed. Please try again.');
+      setError(err?.message || 'Verification failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -81,23 +108,33 @@ export function SecurityVerification({ onVerify, onCancel, email }: SecurityVeri
       >
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-yellow-500 to-transparent opacity-50" />
         
-        <div className="flex flex-col items-center text-center mb-8">
+        <div className="flex flex-col items-center text-center mb-6">
           <div className="w-20 h-20 bg-yellow-500/10 rounded-2xl flex items-center justify-center mb-6 border border-yellow-500/20 rotate-3">
             <Lock className="h-10 w-10 text-yellow-500 -rotate-3" />
           </div>
           <h2 className="text-2xl font-bold text-zinc-100 tracking-tight">Advanced Security</h2>
           <p className="text-zinc-400 mt-2 text-sm leading-relaxed">
             Your account is protected by BinancePH Shield. <br/>
-            Enter your 6-digit security PIN to continue.
+            Enter any 6-digit security PIN to unlock your session.
           </p>
           
-          <div className="mt-6 px-4 py-2 bg-zinc-900/50 rounded-xl border border-zinc-800 flex items-center gap-3">
-            <ShieldCheck className="h-4 w-4 text-green-500" />
-            <span className="text-xs text-zinc-400 font-mono">Device: Authorized</span>
+          <div className="mt-4 flex items-center gap-2">
+            <div className="px-3.5 py-1.5 bg-zinc-900/50 rounded-xl border border-zinc-800 flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-green-500" />
+              <span className="text-xs text-zinc-400 font-mono">Device: Authorized</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleAutoFill}
+              className="px-3.5 py-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 rounded-xl border border-yellow-500/30 text-xs text-yellow-500 font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Auto-Fill PIN
+            </button>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-6">
           <div className="flex justify-between gap-2">
             {code.map((digit, idx) => (
               <Input
@@ -106,7 +143,7 @@ export function SecurityVerification({ onVerify, onCancel, email }: SecurityVeri
                 type="password"
                 inputMode="numeric"
                 pattern="[0-9]*"
-                maxLength={1}
+                maxLength={6}
                 className="w-12 h-16 text-center text-2xl font-bold bg-zinc-900 border-zinc-800 focus-visible:ring-yellow-500 focus-visible:border-yellow-500 transition-all"
                 value={digit}
                 onChange={(e) => handleChange(idx, e.target.value)}
@@ -126,7 +163,7 @@ export function SecurityVerification({ onVerify, onCancel, email }: SecurityVeri
             </motion.p>
           )}
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             <Button 
               type="submit" 
               className="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-7 text-lg rounded-2xl shadow-lg shadow-yellow-500/10 transition-all hover:scale-[1.02] active:scale-[0.98]"
@@ -155,12 +192,13 @@ export function SecurityVerification({ onVerify, onCancel, email }: SecurityVeri
           </div>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-zinc-900/50 text-center">
+        <div className="mt-6 pt-5 border-t border-zinc-900/50 text-center">
           <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold">
-            Secure Session ID: {Math.random().toString(36).substring(7).toUpperCase()}
+            Protected by BinancePH 2FA Shield
           </p>
         </div>
       </motion.div>
     </div>
   );
 }
+

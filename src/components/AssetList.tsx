@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TrendingUp, TrendingDown, Search, ArrowUpDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { formatPrice } from '@/lib/binance';
 
 export interface Asset {
   symbol: string;
@@ -10,6 +11,8 @@ export interface Asset {
   price: number;
   change: number;
   volume: string;
+  high24h?: number;
+  low24h?: number;
 }
 
 export function AssetList({ assets, onSelect }: { assets: Asset[], onSelect: (asset: Asset) => void }) {
@@ -103,8 +106,8 @@ export function AssetList({ assets, onSelect }: { assets: Asset[], onSelect: (as
                   </div>
                 </div>
                 <div className="text-right min-w-[70px]">
-                  <div className="font-mono text-sm text-zinc-100">
-                    ${asset.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <div className="font-mono text-sm text-zinc-100 font-bold">
+                    ${formatPrice(asset.price)}
                   </div>
                   <div className={`text-[10px] font-mono flex items-center justify-end gap-1 ${asset.change >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                     {asset.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}

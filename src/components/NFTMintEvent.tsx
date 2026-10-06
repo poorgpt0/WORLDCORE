@@ -100,12 +100,17 @@ export function NFTMintEvent({ isVerified }: { isVerified: boolean }) {
   useEffect(() => {
     if (!user) return;
     const userRef = doc(db, 'users', user.uid);
-    const unsub = onSnapshot(userRef, (docSnap) => {
-      if (docSnap.exists() && docSnap.data().hasMintedNFT) {
-        setHasMinted(true);
-      }
-    }, (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`));
-    return () => unsub();
+    let unsub: (() => void) | null = null;
+    try {
+      unsub = onSnapshot(userRef, (docSnap) => {
+        if (docSnap.exists() && docSnap.data().hasMintedNFT) {
+          setHasMinted(true);
+        }
+      }, () => {});
+    } catch {}
+    return () => {
+      if (unsub) unsub();
+    };
   }, [user]);
 
   // Generate high-resolution collectible artwork canvas based on Gemini response

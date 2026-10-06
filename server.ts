@@ -3,26 +3,37 @@ import { GoogleGenAI } from '@google/genai';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import fs from 'fs';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const rawPort =
+  process.env.PORT && process.env.PORT !== process.env.NGINX_PORT
+    ? process.env.PORT
+    : process.env.DEFAULT_APP_PORT || process.env.PORT || '3000';
+const PORT = parseInt(rawPort, 10) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Shared server-side Gemini Client
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
+// Lazy server-side Gemini Client so startup never logs stderr warnings or fails if key is injected later
+let aiClient = null;
+function getAiClient() {
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY || 'MISSING_API_KEY',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return aiClient;
+}
 
 // Gemini Flash Latest Generate Content API
 // Handles both prompt string and full contents payload:
@@ -31,21 +42,39 @@ app.post('/api/gemini/generate', async (req, res) => {
   try {
     const { prompt, contents } = req.body;
     const inputContents = contents || prompt || 'Explain how AI works in a few words';
+    const ai = getAiClient();
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-flash-latest',
-      contents: inputContents,
-    });
+    let response;
+    let usedModel = 'gemini-flash-latest';
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-flash-latest',
+        contents: inputContents,
+      });
+    } catch (err) {
+      const errMsg = err && typeof err === 'object' && 'message' in err ? String(err.message) : '';
+      const errStatus = err && typeof err === 'object' && 'status' in err ? err.status : 0;
+      if (errMsg.includes('503') || errMsg.includes('high demand') || errStatus === 503) {
+        usedModel = 'gemini-2.5-flash';
+        response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: inputContents,
+        });
+      } else {
+        throw err;
+      }
+    }
 
     res.json({
       text: response.text,
-      model: 'gemini-flash-latest',
+      model: usedModel,
       status: 'success'
     });
-  } catch (error: any) {
+  } catch (error) {
+    const errMsg = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Failed to generate content with Gemini';
     console.error('Gemini API Error:', error);
     res.status(500).json({
-      error: error?.message || 'Failed to generate content with Gemini',
+      error: errMsg,
       status: 'error'
     });
   }
@@ -56,6 +85,7 @@ app.post('/api/gemini/generate-nft', async (req, res) => {
   try {
     const { prompt } = req.body;
     const userPrompt = prompt || 'A cyberpunk golden ape in a neon city, highly detailed, 4k';
+    const ai = getAiClient();
 
     const response = await ai.models.generateContent({
       model: 'gemini-flash-latest',
@@ -97,21 +127,125 @@ Respond in JSON format with keys:
       metadata: data,
       prompt: userPrompt
     });
-  } catch (error: any) {
+  } catch (error) {
+    const errMsg = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Failed to generate NFT metadata';
     console.error('NFT Lore Generation Error:', error);
     res.status(500).json({
       success: false,
-      error: error?.message || 'Failed to generate NFT metadata'
+      error: errMsg
     });
   }
 });
 
+// Binance REST API Proxy Endpoints with caching
+let tickerCache = null;
+const CACHE_TTL = 1500; // 1.5 seconds cache for tickers
+
+app.get('/api/binance/ticker/24hr', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (tickerCache && (now - tickerCache.timestamp) < CACHE_TTL) {
+      return res.json(tickerCache.data);
+    }
+    const response = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+    if (!response.ok) {
+      throw new Error(`Binance API error: ${response.statusText}`);
+    }
+    const data = await response.json();
+    tickerCache = { data, timestamp: now };
+    res.json(data);
+  } catch (error) {
+    const errMsg = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Failed to fetch Binance tickers';
+    console.error('Binance ticker proxy error:', error);
+    if (tickerCache) {
+      return res.json(tickerCache.data);
+    }
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+app.get('/api/binance/klines', async (req, res) => {
+  try {
+    const { symbol = 'BTCUSDT', interval = '1m', limit = '100' } = req.query;
+    const url = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(String(symbol))}&interval=${encodeURIComponent(String(interval))}&limit=${encodeURIComponent(String(limit))}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Binance klines error: ${response.statusText}`);
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    const errMsg = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Failed to fetch Binance klines';
+    console.error('Binance klines proxy error:', error);
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+app.get('/api/binance/depth', async (req, res) => {
+  try {
+    const { symbol = 'BTCUSDT', limit = '10' } = req.query;
+    const url = `https://api.binance.com/api/v3/depth?symbol=${encodeURIComponent(String(symbol))}&limit=${encodeURIComponent(String(limit))}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Binance depth error: ${response.statusText}`);
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    const errMsg = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Failed to fetch Binance depth';
+    console.error('Binance depth proxy error:', error);
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+app.get('/api/binance/trades', async (req, res) => {
+  try {
+    const { symbol = 'BTCUSDT', limit = '20' } = req.query;
+    const url = `https://api.binance.com/api/v3/trades?symbol=${encodeURIComponent(String(symbol))}&limit=${encodeURIComponent(String(limit))}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Binance trades error: ${response.statusText}`);
+    }
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    const errMsg = error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Failed to fetch Binance trades';
+    console.error('Binance trades proxy error:', error);
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+// Health check endpoints for Cloud Run
+app.get('/healthz', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    appUrl: process.env.APP_URL || `http://localhost:${PORT}`,
+    timestamp: new Date().toISOString() 
+  });
+});
+
 // Full-stack Vite dev middleware or static serving
 async function startServer() {
-  if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  const distPath = path.join(__dirname, 'dist');
+  const indexPath = path.join(distPath, 'index.html');
+  const isProd = process.env.NODE_ENV === 'production' || Boolean(process.env.K_SERVICE);
+  const hasDist = fs.existsSync(indexPath);
+
+  if (isProd || hasDist) {
+    app.use(express.static(distPath));
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api')) {
+        return next();
+      }
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send('<!doctype html><html><body><div id="root">Loading...</div></body></html>');
+      }
     });
   } else {
     const { createServer } = await import('vite');

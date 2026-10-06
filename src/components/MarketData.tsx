@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
 import { Asset } from './AssetList';
-import { Search, ArrowUpDown, TrendingUp, TrendingDown } from 'lucide-react';
+import { Search, ArrowUpDown, TrendingUp, TrendingDown, Radio } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { motion, AnimatePresence } from 'motion/react';
+import { formatPrice } from '@/lib/binance';
 
 interface MarketDataProps {
   assets: Asset[];
@@ -60,10 +61,16 @@ export function MarketData({ assets, onTrade }: MarketDataProps) {
     <div className="w-full max-w-7xl mx-auto flex flex-col h-full space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-3xl font-black text-zinc-100 flex items-center gap-3">
-            Market Data
-          </h2>
-          <p className="text-zinc-500 text-sm mt-1">Real-time cryptocurrency prices and statistics.</p>
+          <div className="flex items-center gap-3">
+            <h2 className="text-3xl font-black text-zinc-100 flex items-center gap-3">
+              Market Data
+            </h2>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-500 text-[10px] font-bold uppercase tracking-wider">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Live Binance
+            </div>
+          </div>
+          <p className="text-zinc-500 text-sm mt-1">Real-time cryptocurrency prices and statistics streamed live from Binance.</p>
         </div>
 
         <div className="relative w-full sm:w-72">
@@ -138,7 +145,7 @@ export function MarketData({ assets, onTrade }: MarketDataProps) {
                       </td>
                       <td className="p-4 text-right">
                         <div className="font-mono text-zinc-100 font-bold">
-                          ${asset.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
+                          ${formatPrice(asset.price)}
                         </div>
                       </td>
                       <td className="p-4 text-right">

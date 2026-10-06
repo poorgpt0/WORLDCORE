@@ -3,11 +3,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Asset } from './AssetList';
-import { Wallet, Lock, Clock } from 'lucide-react';
+import { Wallet, Lock, Clock, BookOpen, Activity } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { AuthModal } from './AuthModal';
 import { cn } from '@/lib/utils';
 import { useAccount, useBalance } from 'wagmi';
+import { formatPrice, fetchLiveBinanceTrades, fetchLiveBinanceDepth, OrderBookLevel, LiveTrade } from '@/lib/binance';
 
 interface Trade {
   id: number;
@@ -57,43 +58,116 @@ export function TradingPanel({ asset, isVerified }: { asset: Asset, isVerified: 
   };
 
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [depth, setDepth] = useState<{ bids: OrderBookLevel[]; asks: OrderBookLevel[] }>({ bids: [], asks: [] });
+  const [marketView, setMarketView] = useState<'trades' | 'orderbook'>('trades');
 
+  // Fetch initial trades and depth immediately on asset change
   useEffect(() => {
-    let ws: WebSocket;
     let isMounted = true;
-    
-    setTrades([]); // reset trades when asset changes
 
-    const connectWS = () => {
-      ws = new WebSocket(`wss://stream.binance.com:9443/ws/${asset.symbol.toLowerCase()}usdt@aggTrade`);
+    fetchLiveBinanceTrades(asset.symbol, 20).then((liveTrades) => {
+      if (isMounted && liveTrades.length > 0) {
+        setTrades(liveTrades);
+      }
+    });
 
-      ws.onmessage = (event) => {
-        if (!isMounted) return;
-        const data = JSON.parse(event.data);
-        if (data.e === 'aggTrade') {
-          const newTrade = {
-            id: data.a,
-            price: data.p,
-            qty: data.q,
-            time: data.T,
-            isBuyerMaker: data.m
-          };
-          setTrades(prev => [newTrade, ...prev].slice(0, 30));
-        }
-      };
-
-      ws.onclose = () => {
-        if (isMounted) {
-          setTimeout(connectWS, 3000);
-        }
-      };
-    };
-
-    connectWS();
+    fetchLiveBinanceDepth(asset.symbol, 10).then((liveDepth) => {
+      if (isMounted) {
+        setDepth(liveDepth);
+      }
+    });
 
     return () => {
       isMounted = false;
-      if (ws) ws.close();
+    };
+  }, [asset.symbol]);
+
+  // Connect to Binance aggregate trades & depth stream
+  useEffect(() => {
+    let tradeWs: WebSocket | null = null;
+    let depthWs: WebSocket | null = null;
+    let isMounted = true;
+
+    const connectTradeWS = () => {
+      try {
+        tradeWs = new WebSocket(`wss://stream.binance.com:9443/ws/${asset.symbol.toLowerCase()}usdt@aggTrade`);
+
+        tradeWs.onmessage = (event) => {
+          if (!isMounted) return;
+          try {
+            const data = JSON.parse(event.data);
+            if (data.e === 'aggTrade') {
+              const newTrade = {
+                id: data.a,
+                price: data.p,
+                qty: data.q,
+                time: data.T,
+                isBuyerMaker: data.m
+              };
+              setTrades(prev => [newTrade, ...prev].slice(0, 30));
+            }
+          } catch {
+            // ignore
+          }
+        };
+
+        tradeWs.onclose = () => {
+          if (isMounted) {
+            setTimeout(connectTradeWS, 3000);
+          }
+        };
+      } catch {
+        // ignore
+      }
+    };
+
+    const connectDepthWS = () => {
+      try {
+        depthWs = new WebSocket(`wss://stream.binance.com:9443/ws/${asset.symbol.toLowerCase()}usdt@depth10@1000ms`);
+
+        depthWs.onmessage = (event) => {
+          if (!isMounted) return;
+          try {
+            const data = JSON.parse(event.data);
+            if (Array.isArray(data.bids) && Array.isArray(data.asks)) {
+              let runningBidTotal = 0;
+              const bids = data.bids.map((b: [string, string]) => {
+                const price = parseFloat(b[0]);
+                const qty = parseFloat(b[1]);
+                runningBidTotal += qty;
+                return { price, qty, total: runningBidTotal };
+              });
+              let runningAskTotal = 0;
+              const asks = data.asks.map((a: [string, string]) => {
+                const price = parseFloat(a[0]);
+                const qty = parseFloat(a[1]);
+                runningAskTotal += qty;
+                return { price, qty, total: runningAskTotal };
+              });
+              setDepth({ bids, asks });
+            }
+          } catch {
+            // ignore
+          }
+        };
+
+        depthWs.onclose = () => {
+          if (isMounted) {
+            setTimeout(connectDepthWS, 3000);
+          }
+        };
+      } catch {
+        // ignore
+      }
+    };
+
+    connectTradeWS();
+    connectDepthWS();
+
+    return () => {
+      isMounted = false;
+      if (tradeWs) tradeWs.close();
+      if (depthWs) depthWs.close();
     };
   }, [asset.symbol]);
 
@@ -164,8 +238,8 @@ export function TradingPanel({ asset, isVerified }: { asset: Asset, isVerified: 
                   <span>USDT</span>
                 </div>
                 <Input 
-                  type="number" 
-                  value={orderType === 'market' ? asset.price.toFixed(2) : limitPrice} 
+                  type="text" 
+                  value={orderType === 'market' ? formatPrice(asset.price) : limitPrice} 
                   onChange={(e) => orderType === 'limit' && setLimitPrice(e.target.value)}
                   readOnly={orderType === 'market'}
                   className="bg-zinc-900 border-zinc-800 text-zinc-100 font-mono focus-visible:ring-yellow-500 h-10"
@@ -215,7 +289,7 @@ export function TradingPanel({ asset, isVerified }: { asset: Asset, isVerified: 
               <div className="flex justify-between text-sm mb-3">
                 <span className="text-zinc-500 font-medium">Total Cost</span>
                 <span className="text-zinc-100 font-mono font-bold">
-                  ${((Number(amount) * (orderType === 'market' ? asset.price : (Number(limitPrice) || 0))) / leverage).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  ${((Number(amount) * (orderType === 'market' ? asset.price : (Number(limitPrice) || 0))) / leverage).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
                 </span>
               </div>
               <Button 
@@ -235,8 +309,8 @@ export function TradingPanel({ asset, isVerified }: { asset: Asset, isVerified: 
                   <span>USDT</span>
                 </div>
                 <Input 
-                  type="number" 
-                  value={orderType === 'market' ? asset.price.toFixed(2) : limitPrice} 
+                  type="text" 
+                  value={orderType === 'market' ? formatPrice(asset.price) : limitPrice} 
                   onChange={(e) => orderType === 'limit' && setLimitPrice(e.target.value)}
                   readOnly={orderType === 'market'}
                   className="bg-zinc-900 border-zinc-800 text-zinc-100 font-mono focus-visible:ring-yellow-500 h-10"
@@ -412,35 +486,97 @@ export function TradingPanel({ asset, isVerified }: { asset: Asset, isVerified: 
           )}
         </div>
 
-        <div className="mt-8 pt-8 border-t border-zinc-900">
-          <div className="flex items-center gap-2 text-zinc-400 mb-4">
-            <Clock className="h-4 w-4 text-yellow-500" />
-            <span className="text-[10px] font-bold uppercase tracking-widest">Latest Trades</span>
-          </div>
-          <div className="space-y-1">
-            <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-600 mb-2">
-              <span>Price(USDT)</span>
-              <span>Amount({asset.symbol})</span>
-              <span>Time</span>
+        <div className="mt-8 pt-6 border-t border-zinc-900">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-1 bg-zinc-900/60 p-0.5 rounded-lg border border-zinc-800">
+              <button
+                onClick={() => setMarketView('trades')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                  marketView === 'trades' ? 'bg-zinc-800 text-yellow-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Clock className="h-3 w-3" /> Latest Trades
+              </button>
+              <button
+                onClick={() => setMarketView('orderbook')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                  marketView === 'orderbook' ? 'bg-zinc-800 text-yellow-500 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <BookOpen className="h-3 w-3" /> Order Book
+              </button>
             </div>
-            {trades.length === 0 ? (
-              <div className="text-center text-xs text-zinc-600 py-4">Waiting for trades...</div>
-            ) : (
-              trades.slice(0, 10).map((trade, idx) => (
-                <div key={`${trade.id}-${idx}`} className="flex justify-between text-xs font-mono animate-in fade-in slide-in-from-top-1 duration-200">
-                  <span className={trade.isBuyerMaker ? 'text-red-500' : 'text-green-500'}>
-                    {parseFloat(trade.price).toString()}
-                  </span>
-                  <span className="text-zinc-300">
-                    {parseFloat(trade.qty).toString()}
-                  </span>
-                  <span className="text-zinc-600">
-                    {new Date(trade.time).toLocaleTimeString(undefined, { hour12: false, hour: '2-digit', minute: '2-digit', second:'2-digit' })}
-                  </span>
-                </div>
-              ))
-            )}
+            <span className="text-[9px] font-mono text-zinc-500 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Live
+            </span>
           </div>
+
+          {marketView === 'trades' ? (
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-600 mb-2">
+                <span>Price(USDT)</span>
+                <span>Amount({asset.symbol})</span>
+                <span>Time</span>
+              </div>
+              {trades.length === 0 ? (
+                <div className="text-center text-xs text-zinc-600 py-4">Waiting for Binance trades...</div>
+              ) : (
+                trades.slice(0, 10).map((trade, idx) => (
+                  <div key={`${trade.id}-${idx}`} className="flex justify-between text-xs font-mono animate-in fade-in slide-in-from-top-1 duration-200">
+                    <span className={trade.isBuyerMaker ? 'text-red-500 font-medium' : 'text-green-500 font-medium'}>
+                      {formatPrice(parseFloat(trade.price))}
+                    </span>
+                    <span className="text-zinc-300">
+                      {parseFloat(trade.qty).toString()}
+                    </span>
+                    <span className="text-zinc-600">
+                      {new Date(trade.time).toLocaleTimeString(undefined, { hour12: false, hour: '2-digit', minute: '2-digit', second:'2-digit' })}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-600 mb-2">
+                <span>Price(USDT)</span>
+                <span>Size({asset.symbol})</span>
+                <span>Total</span>
+              </div>
+              {/* Asks (Sells - Red) */}
+              <div className="space-y-0.5">
+                {depth.asks.slice(0, 5).reverse().map((ask, idx) => (
+                  <div key={`ask-${idx}`} className="relative flex justify-between text-[11px] font-mono py-0.5 px-1 rounded overflow-hidden">
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 bg-red-500/10 pointer-events-none" 
+                      style={{ width: `${Math.min(100, (ask.qty / (depth.asks[4]?.total || 1)) * 100)}%` }} 
+                    />
+                    <span className="text-red-500 font-bold z-10">{formatPrice(ask.price)}</span>
+                    <span className="text-zinc-300 z-10">{ask.qty.toFixed(4)}</span>
+                    <span className="text-zinc-600 z-10">{ask.total.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="py-1 my-1 border-y border-zinc-900 text-center font-mono font-bold text-xs text-yellow-500">
+                ${formatPrice(asset.price)}
+              </div>
+              {/* Bids (Buys - Green) */}
+              <div className="space-y-0.5">
+                {depth.bids.slice(0, 5).map((bid, idx) => (
+                  <div key={`bid-${idx}`} className="relative flex justify-between text-[11px] font-mono py-0.5 px-1 rounded overflow-hidden">
+                    <div 
+                      className="absolute right-0 top-0 bottom-0 bg-green-500/10 pointer-events-none" 
+                      style={{ width: `${Math.min(100, (bid.qty / (depth.bids[4]?.total || 1)) * 100)}%` }} 
+                    />
+                    <span className="text-green-500 font-bold z-10">{formatPrice(bid.price)}</span>
+                    <span className="text-zinc-300 z-10">{bid.qty.toFixed(4)}</span>
+                    <span className="text-zinc-600 z-10">{bid.total.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-8 pt-8 border-t border-zinc-900">

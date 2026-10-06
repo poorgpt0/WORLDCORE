@@ -4,13 +4,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { User as UserIcon, Lock, Image as ImageIcon, ShieldCheck, BadgeCheck, Loader2, LogOut, Key } from 'lucide-react';
 import { useAccount, useDisconnect } from 'wagmi';
-import { auth, db } from '@/lib/firebase';
-import { updateProfile, updatePassword, User, signOut } from 'firebase/auth';
+import { auth, db, updateProfile, updatePassword, signOut } from '@/lib/firebase';
+import { authService, nativeAuth } from '@/lib/authService';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '@/lib/firebase';
 
 interface UserProfileProps {
-  user: User | null;
+  user: any;
   onLogout?: () => void;
 }
 
@@ -26,9 +25,9 @@ export function UserProfile({ user, onLogout }: UserProfileProps) {
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  const [isNftOwner, setIsNftOwner] = useState(false);
-  const [verifiedWallet, setVerifiedWallet] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState<string | null>(null);
+  const [isNftOwner, setIsNftOwner] = useState(Boolean(user?.isNftOwner));
+  const [verifiedWallet, setVerifiedWallet] = useState<string | null>(user?.verifiedWallet || null);
+  const [apiKey, setApiKey] = useState<string | null>(user?.apiKey || null);
 
   const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
@@ -39,18 +38,23 @@ export function UserProfile({ user, onLogout }: UserProfileProps) {
       if (user) {
         setUsername(user.displayName || '');
         setPhotoURL(user.photoURL || '');
+        if (user.isNftOwner !== undefined) setIsNftOwner(Boolean(user.isNftOwner));
+        if (user.verifiedWallet) setVerifiedWallet(user.verifiedWallet);
+        if (user.apiKey) setApiKey(user.apiKey);
         
-        try {
-          const docRef = doc(db, 'users', user.uid);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            setIsNftOwner(docSnap.data().isNftOwner || false);
-            setVerifiedWallet(docSnap.data().verifiedWallet || null);
-            if (docSnap.data().photoURL) setPhotoURL(docSnap.data().photoURL);
-            if (docSnap.data().apiKey) setApiKey(docSnap.data().apiKey);
+        if (nativeAuth.currentUser) {
+          try {
+            const docRef = doc(db, 'users', user.uid);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+              setIsNftOwner(docSnap.data().isNftOwner || false);
+              setVerifiedWallet(docSnap.data().verifiedWallet || null);
+              if (docSnap.data().photoURL) setPhotoURL(docSnap.data().photoURL);
+              if (docSnap.data().apiKey) setApiKey(docSnap.data().apiKey);
+            }
+          } catch {
+            // Use local profile state
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
         }
       }
     }
@@ -70,17 +74,18 @@ export function UserProfile({ user, onLogout }: UserProfileProps) {
         photoURL: photoURL
       });
       
-      const userRef = doc(db, 'users', auth.currentUser.uid);
-      await updateDoc(userRef, {
-        displayName: username,
-        photoURL: photoURL
-      });
+      if (nativeAuth.currentUser) {
+        try {
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          await updateDoc(userRef, {
+            displayName: username,
+            photoURL: photoURL
+          });
+        } catch {}
+      }
 
       setSuccessMessage('Profile updated successfully!');
     } catch (error: any) {
-      if (error && error.message && error.message.includes('permission')) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${auth!.currentUser!.uid}`);
-      }
       setErrorMessage(error.message || 'Failed to update profile.');
     } finally {
       setIsUpdating(false);
@@ -94,16 +99,18 @@ export function UserProfile({ user, onLogout }: UserProfileProps) {
     setSuccessMessage('');
     try {
       const newKey = 'bph_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      const userRef = doc(db, 'users', auth.currentUser.uid);
-      await updateDoc(userRef, {
-        apiKey: newKey
-      });
+      authService.updateUserFields({ apiKey: newKey });
+      if (nativeAuth.currentUser) {
+        try {
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          await updateDoc(userRef, {
+            apiKey: newKey
+          });
+        } catch {}
+      }
       setApiKey(newKey);
       setSuccessMessage('New API Key generated successfully!');
     } catch (error: any) {
-      if (error && error.message && error.message.includes('permission')) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${auth!.currentUser!.uid}`);
-      }
       setErrorMessage(error.message || 'Failed to generate API Key.');
     } finally {
       setIsUpdating(false);
@@ -140,18 +147,23 @@ export function UserProfile({ user, onLogout }: UserProfileProps) {
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      const userRef = doc(db, 'users', auth.currentUser.uid);
-      await updateDoc(userRef, {
+      authService.updateUserFields({
         isNftOwner: true,
         verifiedWallet: address
       });
+      if (nativeAuth.currentUser) {
+        try {
+          const userRef = doc(db, 'users', auth.currentUser.uid);
+          await updateDoc(userRef, {
+            isNftOwner: true,
+            verifiedWallet: address
+          });
+        } catch {}
+      }
       setIsNftOwner(true);
       setVerifiedWallet(address);
       setSuccessMessage('Wallet verified! You are now recognized as an NFT Owner.');
-    } catch (error: any) {
-      if (error && error.message && error.message.includes('permission')) {
-        handleFirestoreError(error, OperationType.UPDATE, `users/${auth!.currentUser!.uid}`);
-      }
+    } catch {
       setErrorMessage('Failed to verify wallet.');
     } finally {
       setIsUpdating(false);
@@ -176,13 +188,14 @@ export function UserProfile({ user, onLogout }: UserProfileProps) {
         setIsUpdating(true);
         try {
           await updateProfile(auth.currentUser, { photoURL: resultString });
-          const userRef = doc(db, 'users', auth.currentUser.uid);
-          await updateDoc(userRef, { photoURL: resultString });
+          if (nativeAuth.currentUser) {
+            try {
+              const userRef = doc(db, 'users', auth.currentUser.uid);
+              await updateDoc(userRef, { photoURL: resultString });
+            } catch {}
+          }
           setSuccessMessage('Profile photo updated successfully!');
         } catch (error: any) {
-          if (error && error.message && error.message.includes('permission')) {
-            handleFirestoreError(error, OperationType.UPDATE, `users/${auth!.currentUser!.uid}`);
-          }
           setErrorMessage(error.message || 'Failed to update profile photo.');
         } finally {
           setIsUpdating(false);
